@@ -1,0 +1,124 @@
+name: techdesk-backend
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - techdesk-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - techdesk-pgadmin-data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  flyway:
+    image: redgate/flyway:latest
+    command:
+      [
+        "-url=jdbc:postgresql://postgres:5432/${POSTGRES_DB}",
+        "-user=${POSTGRES_USER}",
+        "-password=${POSTGRES_PASSWORD}",
+        "-schemas=public",
+        "-defaultSchema=public",
+        "-locations=filesystem:/flyway/sql",
+        "-connectRetries=60",
+        "migrate"
+      ]
+    volumes:
+      - ./infrastructure/db/migration/public:/flyway/sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  discovery-server:
+    build:
+      context: ./services/discovery-server
+    ports:
+      - "8761:8761"
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
+      TENANT_RESOLUTION_JWT_HMAC_SECRET: ${TENANT_JWT_SECRET}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: api-gateway
+    depends_on:
+      discovery-server:
+        condition: service_started
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+    ports:
+      - "8081:8081"
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: auth-service
+    depends_on:
+      discovery-server:
+        condition: service_started
+      flyway:
+        condition: service_completed_successfully
+
+  tenant-service:
+    build:
+      context: ./services/tenant-service
+    ports:
+      - "8082:8082"
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: tenant-service
+    depends_on:
+      discovery-server:
+        condition: service_started
+      flyway:
+        condition: service_completed_successfully
+
+  audit-service:
+    build:
+      context: ./services/audit-service
+    ports:
+      - "8083:8083"
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: audit-service
+    depends_on:
+      discovery-server:
+        condition: service_started
+      flyway:
+        condition: service_completed_successfully
+
+volumes:
+  techdesk-postgres-data:
+  techdesk-pgadmin-data:

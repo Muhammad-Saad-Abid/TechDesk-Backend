@@ -1,0 +1,11 @@
+# Local secrets
+.env
+
+# Java build output
+**/target/
+
+# IDE and operating-system files
+.vscode/
+.idea/
+*.iml
+.DS_Store
