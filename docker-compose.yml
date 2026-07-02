@@ -32,6 +32,26 @@ services:
       postgres:
         condition: service_healthy
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - techdesk-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
   flyway:
     image: redgate/flyway:latest
     command:
@@ -67,7 +87,7 @@ services:
       - "8080:8080"
     environment:
       JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
-      TENANT_RESOLUTION_JWT_HMAC_SECRET: ${TENANT_JWT_SECRET}
+      TENANT_RESOLUTION_JWT_HMAC_SECRET: ${AUTH_JWT_SECRET}
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       EUREKA_INSTANCE_HOSTNAME: api-gateway
     depends_on:
@@ -81,6 +101,14 @@ services:
       - "8081:8081"
     environment:
       JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_MAIL_HOST: mailhog
+      SPRING_MAIL_PORT: 1025
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       EUREKA_INSTANCE_HOSTNAME: auth-service
     depends_on:
@@ -88,6 +116,8 @@ services:
         condition: service_started
       flyway:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   tenant-service:
     build:
@@ -122,3 +152,4 @@ services:
 volumes:
   techdesk-postgres-data:
   techdesk-pgadmin-data:
+  techdesk-redis-data:

@@ -161,7 +161,8 @@ public class TenantResolutionGlobalFilter implements GlobalFilter, Ordered {
 
             if (!claims.hasNonNull("exp")
                     || !claims.path("exp").canConvertToLong()
-                    || claims.path("exp").asLong() <= Instant.now().getEpochSecond()) {
+                    || claims.path("exp").asLong() <= Instant.now().getEpochSecond()
+                    || !"access".equals(claims.path("tokenType").asText())) {
                 return Optional.empty();
             }
 
