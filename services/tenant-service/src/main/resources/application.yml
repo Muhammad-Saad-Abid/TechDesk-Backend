@@ -2,16 +2,66 @@ spring:
   application:
     name: tenant-service
 
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/techdesk}
+    username: ${SPRING_DATASOURCE_USERNAME:techdesk}
+    password: ${SPRING_DATASOURCE_PASSWORD:techdesk_dev_password}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: false
+
+  mail:
+    host: ${SPRING_MAIL_HOST:localhost}
+    port: ${SPRING_MAIL_PORT:1025}
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+
+  data:
+    web:
+      pageable:
+        max-page-size: 100
+
+  task:
+    scheduling:
+      pool:
+        size: 2
+
 server:
   port: 8082
 
 eureka:
   client:
     service-url:
-      defaultZone: http://localhost:8761/eureka/
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://localhost:8761/eureka/}
 
 management:
   endpoints:
     web:
       exposure:
         include: health,info
+
+tenant:
+  security:
+    jwt-secret: ${AUTH_JWT_SECRET}
+  provisioning:
+    migration-location: classpath:db/migration/tenant
+    portal-url-template: ${TENANT_PORTAL_URL_TEMPLATE:http://%s.techdesk.local}
+    invitation-url: ${TENANT_INVITATION_URL:http://localhost:5173/accept-invitation}
+    invitation-ttl: 24h
+    stale-provisioning-timeout: 1h
+    notification-lease: 2m
+    notification-poll-delay: 5s
+    notification-initial-delay: 5s
+    recovery-poll-delay: 10m
+    recovery-initial-delay: 10m
+    mail-from: ${TENANT_MAIL_FROM:no-reply@techdesk.local}

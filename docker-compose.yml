@@ -126,6 +126,12 @@ services:
       - "8082:8082"
     environment:
       JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      SPRING_MAIL_HOST: mailhog
+      SPRING_MAIL_PORT: 1025
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       EUREKA_INSTANCE_HOSTNAME: tenant-service
     depends_on:
