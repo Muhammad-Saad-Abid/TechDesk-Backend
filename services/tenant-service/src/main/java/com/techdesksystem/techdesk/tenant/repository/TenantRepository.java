@@ -17,6 +17,10 @@ public interface TenantRepository extends
 
     boolean existsBySchemaName(String schemaName);
 
+    List<Tenant> findAllByProvisioningStatus(
+            ProvisioningStatus provisioningStatus
+    );
+
     List<Tenant> findByProvisioningStatusAndCreatedAtBefore(
             ProvisioningStatus provisioningStatus,
             Instant createdBefore

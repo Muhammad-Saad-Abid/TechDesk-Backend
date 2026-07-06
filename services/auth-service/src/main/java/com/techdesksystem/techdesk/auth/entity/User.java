@@ -6,29 +6,21 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
+import jakarta.persistence.Transient;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 
 import java.time.Instant;
 
 @Entity
-@Table(
-        name = "auth_users",
-        uniqueConstraints = {
-                @UniqueConstraint(
-                        name = "uk_auth_users_tenant_email",
-                        columnNames = {"tenant_id", "email"}
-                )
-        }
-)
+@Table(name = "auth_users")
 public class User {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "tenant_id", nullable = false, length = 100)
+    @Transient
     private String tenantId;
 
     @Column(nullable = false, length = 255)

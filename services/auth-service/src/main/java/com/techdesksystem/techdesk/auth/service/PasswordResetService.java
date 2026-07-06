@@ -59,12 +59,13 @@ public class PasswordResetService {
     public void requestPasswordReset(String tenantId, String email) {
         String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
         User user = userRepository
-                .findByTenantIdAndEmail(tenantId, normalizedEmail)
+                .findByEmail(normalizedEmail)
                 .orElse(null);
 
         if (user == null || !user.isEnabled()) {
             return;
         }
+        user.setTenantId(tenantId);
 
         Instant now = Instant.now();
         List<PasswordResetToken> previousTokens =
@@ -110,10 +111,7 @@ public class PasswordResetService {
                 .orElseThrow(this::invalidResetToken);
 
         User user = resetToken.getUser();
-
-        if (!tenantId.equals(user.getTenantId())) {
-            throw invalidResetToken();
-        }
+        user.setTenantId(tenantId);
 
         Instant now = Instant.now();
 

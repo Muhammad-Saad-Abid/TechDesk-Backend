@@ -95,6 +95,8 @@ public class RefreshTokenService {
         refreshTokenRepository.save(currentToken);
 
         User user = currentToken.getUser();
+        user.setTenantId(jwtUtil.parseAccessToken(rawRefreshToken)
+                .get("tenantId", String.class));
         String newRawRefreshToken = createAndStoreRefreshToken(user, now);
 
         return new RotationResult(user, newRawRefreshToken);
@@ -110,6 +112,14 @@ public class RefreshTokenService {
      */
     @Transactional
     public void logout(String tenantId, String rawRefreshToken) {
+        if (!jwtUtil.isRefreshTokenValid(rawRefreshToken)
+                || !tenantId.equals(jwtUtil.parseAccessToken(rawRefreshToken)
+                        .get("tenantId", String.class))) {
+            throw AuthException.forbidden(
+                    "REFRESH_TOKEN_TENANT_MISMATCH",
+                    "Refresh token does not belong to the requested tenant."
+            );
+        }
         String tokenHash = tokenHashUtil.hashToken(rawRefreshToken);
         RefreshToken token = refreshTokenRepository
                 .findForUpdateByTokenHash(tokenHash)
@@ -119,12 +129,7 @@ public class RefreshTokenService {
             return;
         }
 
-        if (!tenantId.equals(token.getUser().getTenantId())) {
-            throw AuthException.forbidden(
-                    "REFRESH_TOKEN_TENANT_MISMATCH",
-                    "Refresh token does not belong to the requested tenant."
-            );
-        }
+        token.getUser().setTenantId(tenantId);
 
         if (token.getRevokedAt() == null) {
             token.setRevokedAt(Instant.now());

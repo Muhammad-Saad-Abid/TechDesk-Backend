@@ -48,6 +48,11 @@ management:
         include: health,info
 
 auth:
+  multitenancy:
+    enabled: true
+    minimum-schema-version: "2"
+    audit-service-url: ${AUDIT_SERVICE_URL:http://localhost:8083}
+    audit-internal-key: ${AUDIT_INTERNAL_KEY}
   jwt:
     secret: ${AUTH_JWT_SECRET}
     access-token-minutes: 15

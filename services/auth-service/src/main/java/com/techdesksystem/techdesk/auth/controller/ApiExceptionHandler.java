@@ -2,6 +2,7 @@ package com.techdesksystem.techdesk.auth.controller;
 
 import com.techdesksystem.techdesk.auth.dto.ApiErrorResponse;
 import com.techdesksystem.techdesk.auth.exception.AuthException;
+import com.techdesksystem.techdesk.auth.tenant.TenantIsolationException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,6 +33,21 @@ public class ApiExceptionHandler {
                 exception.getStatus(),
                 exception.getCode(),
                 exception.getMessage(),
+                request,
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(TenantIsolationException.class)
+    public ResponseEntity<ApiErrorResponse> handleTenantIsolation(
+            TenantIsolationException exception,
+            HttpServletRequest request
+    ) {
+        LOGGER.warn("Tenant isolation request rejected: {}", exception.getMessage());
+        return response(
+                HttpStatus.FORBIDDEN,
+                "TENANT_ISOLATION_VIOLATION",
+                "The request tenant context is invalid.",
                 request,
                 Map.of()
         );

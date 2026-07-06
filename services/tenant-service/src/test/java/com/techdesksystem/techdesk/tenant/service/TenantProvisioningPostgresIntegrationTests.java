@@ -151,7 +151,12 @@ class TenantProvisioningPostgresIntegrationTests {
                 "SELECT COUNT(*) FROM \"" + response.schemaName()
                         + "\".flyway_schema_history WHERE success = TRUE",
                 Integer.class
-        )).isEqualTo(1);
+        )).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT to_regclass('" + response.schemaName()
+                        + ".refresh_tokens') IS NOT NULL",
+                Boolean.class
+        )).isTrue();
 
         var admin = jdbcTemplate.queryForMap(
                 "SELECT id, email, role, enabled FROM \""

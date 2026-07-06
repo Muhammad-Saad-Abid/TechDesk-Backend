@@ -9,6 +9,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.techdesksystem.techdesk.auth.config.SecurityConfig;
+import com.techdesksystem.techdesk.auth.config.AuthMultitenancyProperties;
+import com.techdesksystem.techdesk.auth.config.JwtProperties;
 import com.techdesksystem.techdesk.auth.dto.AuthResponse;
 import com.techdesksystem.techdesk.auth.dto.LogoutRequest;
 import com.techdesksystem.techdesk.auth.dto.ForgotPasswordRequest;
@@ -16,16 +18,22 @@ import com.techdesksystem.techdesk.auth.dto.ResetPasswordRequest;
 import com.techdesksystem.techdesk.auth.dto.RefreshTokenRequest;
 import com.techdesksystem.techdesk.auth.exception.AuthException;
 import com.techdesksystem.techdesk.auth.service.AuthService;
+import com.techdesksystem.techdesk.auth.tenant.TenantIdentifierValidator;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(AuthController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, TenantIdentifierValidator.class})
+@EnableConfigurationProperties({
+        AuthMultitenancyProperties.class,
+        JwtProperties.class
+})
 class AuthControllerTests {
 
     @Autowired

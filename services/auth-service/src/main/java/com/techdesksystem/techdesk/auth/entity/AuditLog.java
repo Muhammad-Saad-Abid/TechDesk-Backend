@@ -11,7 +11,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 @Entity
-@Table(name = "audit_logs")
+@Table(name = "audit_logs", schema = "public")
 public class AuditLog {
 
     @Id

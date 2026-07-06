@@ -61,10 +61,8 @@ class AuthServiceTests {
         User user = enabledUser();
         LoginRequest request = loginRequest("  USER@Example.COM  ", "Password123!");
 
-        given(userRepository.findByTenantIdAndEmail(
-                "tenant_example",
-                "user@example.com"
-        )).willReturn(Optional.of(user));
+        given(userRepository.findByEmail("user@example.com"))
+                .willReturn(Optional.of(user));
         given(passwordEncoder.matches("Password123!", user.getPasswordHash()))
                 .willReturn(true);
         given(refreshTokenService.issueRefreshToken(user))
@@ -85,10 +83,8 @@ class AuthServiceTests {
                 "missing@example.com",
                 "Password123!"
         );
-        given(userRepository.findByTenantIdAndEmail(
-                "tenant_example",
-                "missing@example.com"
-        )).willReturn(Optional.empty());
+        given(userRepository.findByEmail("missing@example.com"))
+                .willReturn(Optional.empty());
 
         assertThatThrownBy(() -> authService.login("tenant_example", request))
                 .isInstanceOfSatisfying(AuthException.class, exception -> {
@@ -104,10 +100,8 @@ class AuthServiceTests {
                 "user@example.com",
                 "WrongPassword123!"
         );
-        given(userRepository.findByTenantIdAndEmail(
-                "tenant_example",
-                "user@example.com"
-        )).willReturn(Optional.of(user));
+        given(userRepository.findByEmail("user@example.com"))
+                .willReturn(Optional.of(user));
         given(passwordEncoder.matches(
                 "WrongPassword123!",
                 user.getPasswordHash()

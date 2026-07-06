@@ -55,7 +55,7 @@ public class AuthService {
 
         String normalizedEmail = normalizeEmail(request.getEmail());
 
-        if (userRepository.existsByTenantIdAndEmail(tenantId, normalizedEmail)) {
+        if (userRepository.existsByEmail(normalizedEmail)) {
             throw AuthException.conflict(
                     "ACCOUNT_ALREADY_EXISTS",
                     "An account with this email already exists for this tenant."
@@ -94,13 +94,14 @@ public class AuthService {
 
         String normalizedEmail = normalizeEmail(request.getEmail());
 
-        User user = userRepository.findByTenantIdAndEmail(tenantId, normalizedEmail)
+        User user = userRepository.findByEmail(normalizedEmail)
                 .orElseThrow(() ->
                         AuthException.unauthorized(
                                 "INVALID_CREDENTIALS",
                                 "Invalid email or password."
                         )
                 );
+        user.setTenantId(tenantId);
 
         if (!user.isEnabled()) {
             throw AuthException.forbidden(
@@ -130,10 +131,8 @@ public class AuthService {
                 refreshTokenService.rotateRefreshToken(request.getRefreshToken());
 
         User user = rotationResult.user();
-
         if (!tenantId.equals(user.getTenantId())) {
             refreshTokenService.revokeAllActiveTokens(user);
-
             throw AuthException.forbidden(
                     "REFRESH_TOKEN_TENANT_MISMATCH",
                     "Refresh token does not belong to the requested tenant."
