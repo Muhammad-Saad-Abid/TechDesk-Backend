@@ -10,7 +10,7 @@ public class AuthMultitenancyProperties {
     private boolean enabled = true;
     private String auditServiceUrl;
     private String auditInternalKey;
-    private String minimumSchemaVersion = "2";
+    private String minimumSchemaVersion = "3";
 
     public boolean isEnabled() {
         return enabled;

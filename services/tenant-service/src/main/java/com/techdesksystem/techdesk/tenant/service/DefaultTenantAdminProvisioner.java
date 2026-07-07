@@ -44,8 +44,10 @@ public class DefaultTenantAdminProvisioner {
         );
         String userSql = "INSERT INTO "
                 + schemaManager.qualifiedTable(schemaName, "auth_users")
-                + " (email, password_hash, first_name, last_name, role, enabled)"
-                + " VALUES (?, ?, ?, ?, 'COMPANY_ADMIN', FALSE) RETURNING id";
+                + " (email, password_hash, first_name, last_name, role, "
+                + "enabled, status)"
+                + " VALUES (?, ?, ?, ?, 'COMPANY_ADMIN', FALSE, 'INVITED') "
+                + "RETURNING id";
         Long userId = jdbcTemplate.queryForObject(
                 userSql,
                 Long.class,

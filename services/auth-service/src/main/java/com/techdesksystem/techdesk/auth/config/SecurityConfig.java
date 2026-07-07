@@ -1,10 +1,12 @@
 package com.techdesksystem.techdesk.auth.config;
 
 import com.techdesksystem.techdesk.auth.tenant.TenantContextFilter;
+import org.springframework.context.annotation.EnableAspectJAutoProxy;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -21,6 +23,8 @@ import java.nio.charset.StandardCharsets;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
+@EnableAspectJAutoProxy
 public class SecurityConfig {
 
     @Bean

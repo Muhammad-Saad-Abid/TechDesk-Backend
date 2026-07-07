@@ -151,20 +151,47 @@ class TenantProvisioningPostgresIntegrationTests {
                 "SELECT COUNT(*) FROM \"" + response.schemaName()
                         + "\".flyway_schema_history WHERE success = TRUE",
                 Integer.class
-        )).isEqualTo(2);
+        )).isEqualTo(3);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT to_regclass('" + response.schemaName()
                         + ".refresh_tokens') IS NOT NULL",
                 Boolean.class
         )).isTrue();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM \"" + response.schemaName()
+                        + "\".roles",
+                Integer.class
+        )).isEqualTo(6);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM \"" + response.schemaName()
+                        + "\".permissions",
+                Integer.class
+        )).isGreaterThan(0);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM \"" + response.schemaName()
+                        + "\".role_permissions",
+                Integer.class
+        )).isGreaterThan(0);
 
         var admin = jdbcTemplate.queryForMap(
-                "SELECT id, email, role, enabled FROM \""
+                "SELECT id, email, role, enabled, status FROM \""
                         + response.schemaName() + "\".auth_users"
         );
         assertThat(admin.get("email")).isEqualTo(request.adminEmail());
         assertThat(admin.get("role")).isEqualTo("COMPANY_ADMIN");
         assertThat(admin.get("enabled")).isEqualTo(false);
+        assertThat(admin.get("status")).isEqualTo("INVITED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM \"" + response.schemaName()
+                        + "\".user_roles user_role "
+                        + "JOIN \"" + response.schemaName()
+                        + "\".roles role ON role.id = user_role.role_id "
+                        + "WHERE user_role.user_id = ? "
+                        + "AND role.name = 'COMPANY_ADMIN' "
+                        + "AND user_role.primary_role = TRUE",
+                Integer.class,
+                admin.get("id")
+        )).isEqualTo(1);
 
         TenantNotificationOutbox event = outboxRepository.findAll()
                 .stream()

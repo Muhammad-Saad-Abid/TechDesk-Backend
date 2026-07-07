@@ -2,9 +2,14 @@ package com.techdesksystem.techdesk.auth.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
 import jakarta.persistence.PrePersist;
@@ -35,11 +40,19 @@ public class User {
     @Column(name = "last_name", length = 100)
     private String lastName;
 
-    @Column(nullable = false, length = 50)
+    @Column(nullable = false, length = 80)
     private String role;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private UserStatus status = UserStatus.ACTIVE;
 
     @Column(nullable = false)
     private boolean enabled = true;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "department_id")
+    private Department department;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -108,7 +121,15 @@ public class User {
     }
 
     public void setRole(String role) {
-        this.role = role;
+        this.role = role == null ? null : role.trim().toUpperCase();
+    }
+
+    public UserStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(UserStatus status) {
+        this.status = status;
     }
 
     public boolean isEnabled() {
@@ -117,6 +138,14 @@ public class User {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    public Department getDepartment() {
+        return department;
+    }
+
+    public void setDepartment(Department department) {
+        this.department = department;
     }
 
     public Instant getCreatedAt() {

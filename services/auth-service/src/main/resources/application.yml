@@ -16,6 +16,9 @@ spring:
       hibernate:
         format_sql: true
 
+  flyway:
+    enabled: false
+
   data:
     redis:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
@@ -50,7 +53,7 @@ management:
 auth:
   multitenancy:
     enabled: true
-    minimum-schema-version: "2"
+    minimum-schema-version: "3"
     audit-service-url: ${AUDIT_SERVICE_URL:http://localhost:8083}
     audit-internal-key: ${AUDIT_INTERNAL_KEY}
   jwt:

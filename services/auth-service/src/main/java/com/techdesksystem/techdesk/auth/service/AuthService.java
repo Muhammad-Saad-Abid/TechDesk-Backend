@@ -9,6 +9,7 @@ import com.techdesksystem.techdesk.auth.dto.RefreshTokenRequest;
 import com.techdesksystem.techdesk.auth.dto.RegisterRequest;
 import com.techdesksystem.techdesk.auth.dto.ResetPasswordRequest;
 import com.techdesksystem.techdesk.auth.entity.User;
+import com.techdesksystem.techdesk.auth.entity.UserStatus;
 import com.techdesksystem.techdesk.auth.exception.AuthException;
 import com.techdesksystem.techdesk.auth.repository.UserRepository;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -69,6 +70,7 @@ public class AuthService {
         user.setFirstName(trimToNull(request.getFirstName()));
         user.setLastName(trimToNull(request.getLastName()));
         user.setRole("EMPLOYEE");
+        user.setStatus(UserStatus.ACTIVE);
         user.setEnabled(true);
 
         User savedUser;
@@ -103,10 +105,10 @@ public class AuthService {
                 );
         user.setTenantId(tenantId);
 
-        if (!user.isEnabled()) {
+        if (!user.isEnabled() || user.getStatus() != UserStatus.ACTIVE) {
             throw AuthException.forbidden(
                     "ACCOUNT_DISABLED",
-                    "This user account is disabled."
+                    "This user account is not active."
             );
         }
 
@@ -139,10 +141,10 @@ public class AuthService {
             );
         }
 
-        if (!user.isEnabled()) {
+        if (!user.isEnabled() || user.getStatus() != UserStatus.ACTIVE) {
             throw AuthException.forbidden(
                     "ACCOUNT_DISABLED",
-                    "This user account is disabled."
+                    "This user account is not active."
             );
         }
 
