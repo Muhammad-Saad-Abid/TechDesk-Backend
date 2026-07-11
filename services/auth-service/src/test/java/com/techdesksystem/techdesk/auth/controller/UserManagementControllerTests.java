@@ -4,6 +4,7 @@ import com.techdesksystem.techdesk.auth.config.AuthMultitenancyProperties;
 import com.techdesksystem.techdesk.auth.config.JwtProperties;
 import com.techdesksystem.techdesk.auth.config.SecurityConfig;
 import com.techdesksystem.techdesk.auth.dto.UserCreateRequest;
+import com.techdesksystem.techdesk.auth.dto.UserInvitationRequest;
 import com.techdesksystem.techdesk.auth.dto.UserPermissionsResponse;
 import com.techdesksystem.techdesk.auth.dto.UserResponse;
 import com.techdesksystem.techdesk.auth.dto.UserRoleAssignmentRequest;
@@ -99,6 +100,39 @@ class UserManagementControllerTests {
                 .andExpect(jsonPath("$.primaryRole").value("EMPLOYEE"));
 
         verify(userManagementService).createUser(any(UserCreateRequest.class));
+    }
+
+    @Test
+    void invitesUserWhenCallerHasInvitePermission() throws Exception {
+        given(permissionService.currentUserHasPermission("users:invite"))
+                .willReturn(true);
+        given(userManagementService.inviteUser(any(UserInvitationRequest.class)))
+                .willReturn(userResponse(
+                        43L,
+                        "invitee@example.com",
+                        "EMPLOYEE",
+                        List.of("EMPLOYEE"),
+                        "INVITED",
+                        false
+                ));
+
+        mockMvc.perform(post("/api/users/invitations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "invitee@example.com",
+                                  "firstName": "Invited",
+                                  "lastName": "User"
+                                }
+                                """)
+                        .with(accessToken()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(43))
+                .andExpect(jsonPath("$.status").value("INVITED"))
+                .andExpect(jsonPath("$.enabled").value(false));
+
+        verify(userManagementService)
+                .inviteUser(any(UserInvitationRequest.class));
     }
 
     @Test
@@ -263,6 +297,30 @@ class UserManagementControllerTests {
                 "Lovelace",
                 "ACTIVE",
                 true,
+                null,
+                null,
+                primaryRole,
+                roles,
+                NOW,
+                NOW
+        );
+    }
+
+    private UserResponse userResponse(
+            Long id,
+            String email,
+            String primaryRole,
+            List<String> roles,
+            String status,
+            boolean enabled
+    ) {
+        return new UserResponse(
+                id,
+                email,
+                "Ada",
+                "Lovelace",
+                status,
+                enabled,
                 null,
                 null,
                 primaryRole,

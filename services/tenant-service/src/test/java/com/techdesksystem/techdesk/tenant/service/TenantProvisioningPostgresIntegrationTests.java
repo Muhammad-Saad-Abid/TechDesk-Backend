@@ -20,22 +20,27 @@ import com.techdesksystem.techdesk.tenant.repository.TenantNotificationOutboxRep
 import com.techdesksystem.techdesk.tenant.repository.TenantRepository;
 import com.techdesksystem.techdesk.tenant.util.SecureTokenUtil;
 import com.techdesksystem.techdesk.tenant.util.TenantSchemaNameUtil;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.mail.MailSendException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -47,46 +52,69 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-@Testcontainers
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
-        "spring.flyway.enabled=true",
-        "spring.flyway.schemas=public",
-        "spring.flyway.default-schema=public",
+        "spring.flyway.enabled=false",
+        "techdesk.database.require-least-privilege=true",
+        "tenant.provisioning-database.require-least-privilege=true",
         "tenant.provisioning.notification-initial-delay=1h",
         "tenant.provisioning.recovery-initial-delay=1h"
 })
 class TenantProvisioningPostgresIntegrationTests {
 
-    @Container
+    private static final String AUTH_USER = "techdesk_auth";
+    private static final String AUTH_PASSWORD = "techdesk_auth_password";
+    private static final String TENANT_USER = "techdesk_tenant";
+    private static final String TENANT_PASSWORD = "techdesk_tenant_password";
+    private static final String PROVISIONER_USER = "techdesk_provisioner";
+    private static final String PROVISIONER_PASSWORD =
+            "techdesk_provisioner_password";
+
     static final PostgreSQLContainer<?> POSTGRES =
             new PostgreSQLContainer<>("postgres:15-alpine")
                     .withDatabaseName("techdesk_tenant_test")
                     .withUsername("techdesk")
                     .withPassword("techdesk_test_password");
 
+    private static final JdbcTemplate ADMIN_JDBC_TEMPLATE;
+    private static final JdbcTemplate AUTH_JDBC_TEMPLATE;
+
+    static {
+        POSTGRES.start();
+        initializeLeastPrivilegeDatabase();
+        ADMIN_JDBC_TEMPLATE = adminJdbcTemplate();
+        AUTH_JDBC_TEMPLATE = authJdbcTemplate();
+    }
+
+    @AfterAll
+    static void stopPostgres() {
+        POSTGRES.stop();
+    }
+
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
-        Path publicMigrations = Path.of(
-                "..",
-                "..",
-                "infrastructure",
-                "db",
-                "migration",
-                "public"
-        ).toAbsolutePath().normalize();
-
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add(
                 "spring.datasource.driver-class-name",
                 () -> "org.postgresql.Driver"
         );
-        registry.add("spring.datasource.username", POSTGRES::getUsername);
-        registry.add("spring.datasource.password", POSTGRES::getPassword);
+        registry.add("spring.datasource.username", () -> TENANT_USER);
+        registry.add("spring.datasource.password", () -> TENANT_PASSWORD);
         registry.add(
-                "spring.flyway.locations",
-                () -> "filesystem:"
-                        + publicMigrations.toString().replace('\\', '/')
+                "tenant.provisioning-database.url",
+                POSTGRES::getJdbcUrl
+        );
+        registry.add(
+                "tenant.provisioning-database.username",
+                () -> PROVISIONER_USER
+        );
+        registry.add(
+                "tenant.provisioning-database.password",
+                () -> PROVISIONER_PASSWORD
+        );
+        registry.add(
+                "tenant.provisioning-database.runtime-role",
+                () -> AUTH_USER
         );
     }
 
@@ -147,33 +175,33 @@ class TenantProvisioningPostgresIntegrationTests {
         assertThat(response.provisioningStatus())
                 .isEqualTo(ProvisioningStatus.READY);
         assertThat(schemaManager.exists(response.schemaName())).isTrue();
-        assertThat(jdbcTemplate.queryForObject(
+        assertThat(ADMIN_JDBC_TEMPLATE.queryForObject(
                 "SELECT COUNT(*) FROM \"" + response.schemaName()
                         + "\".flyway_schema_history WHERE success = TRUE",
                 Integer.class
-        )).isEqualTo(3);
-        assertThat(jdbcTemplate.queryForObject(
+        )).isEqualTo(5);
+        assertThat(ADMIN_JDBC_TEMPLATE.queryForObject(
                 "SELECT to_regclass('" + response.schemaName()
                         + ".refresh_tokens') IS NOT NULL",
                 Boolean.class
         )).isTrue();
-        assertThat(jdbcTemplate.queryForObject(
+        assertThat(ADMIN_JDBC_TEMPLATE.queryForObject(
                 "SELECT COUNT(*) FROM \"" + response.schemaName()
                         + "\".roles",
                 Integer.class
         )).isEqualTo(6);
-        assertThat(jdbcTemplate.queryForObject(
+        assertThat(ADMIN_JDBC_TEMPLATE.queryForObject(
                 "SELECT COUNT(*) FROM \"" + response.schemaName()
                         + "\".permissions",
                 Integer.class
         )).isGreaterThan(0);
-        assertThat(jdbcTemplate.queryForObject(
+        assertThat(ADMIN_JDBC_TEMPLATE.queryForObject(
                 "SELECT COUNT(*) FROM \"" + response.schemaName()
                         + "\".role_permissions",
                 Integer.class
         )).isGreaterThan(0);
 
-        var admin = jdbcTemplate.queryForMap(
+        var admin = ADMIN_JDBC_TEMPLATE.queryForMap(
                 "SELECT id, email, role, enabled, status FROM \""
                         + response.schemaName() + "\".auth_users"
         );
@@ -181,7 +209,7 @@ class TenantProvisioningPostgresIntegrationTests {
         assertThat(admin.get("role")).isEqualTo("COMPANY_ADMIN");
         assertThat(admin.get("enabled")).isEqualTo(false);
         assertThat(admin.get("status")).isEqualTo("INVITED");
-        assertThat(jdbcTemplate.queryForObject(
+        assertThat(ADMIN_JDBC_TEMPLATE.queryForObject(
                 "SELECT COUNT(*) FROM \"" + response.schemaName()
                         + "\".user_roles user_role "
                         + "JOIN \"" + response.schemaName()
@@ -198,7 +226,7 @@ class TenantProvisioningPostgresIntegrationTests {
                 .filter(candidate -> candidate.getTenantId().equals(response.id()))
                 .findFirst()
                 .orElseThrow();
-        String storedHash = jdbcTemplate.queryForObject(
+        String storedHash = ADMIN_JDBC_TEMPLATE.queryForObject(
                 "SELECT jti_hash FROM \"" + response.schemaName()
                         + "\".user_invitation_tokens",
                 String.class
@@ -208,6 +236,42 @@ class TenantProvisioningPostgresIntegrationTests {
                 .isNotEqualTo(event.getInvitationJti());
         assertThat(event.getStatus()).isEqualTo(OutboxStatus.PENDING);
         verifyNoInteractions(notificationGateway);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT current_user",
+                String.class
+        )).isEqualTo(TENANT_USER);
+        assertThat(AUTH_JDBC_TEMPLATE.queryForObject(
+                "SELECT COUNT(*) FROM \"" + response.schemaName()
+                        + "\".auth_users",
+                Integer.class
+        )).isZero();
+        assertThat(AUTH_JDBC_TEMPLATE.queryForObject(
+                "SELECT COUNT(*) FROM \"" + response.schemaName()
+                        + "\".flyway_schema_history",
+                Integer.class
+        )).isEqualTo(5);
+        assertThatThrownBy(() -> AUTH_JDBC_TEMPLATE.update(
+                "DELETE FROM \"" + response.schemaName()
+                        + "\".flyway_schema_history"
+        )).isInstanceOf(DataAccessException.class);
+        assertThat(ADMIN_JDBC_TEMPLATE.queryForObject(
+                "SELECT pg_get_userbyid(nspowner) FROM pg_namespace "
+                        + "WHERE nspname = ?",
+                String.class,
+                response.schemaName()
+        )).isEqualTo(PROVISIONER_USER);
+    }
+
+    @Test
+    void runtimeAndProvisioningRolesHaveLeastPrivilegeBoundaries() {
+        assertRoleIsNonPrivileged(AUTH_USER);
+        assertRoleIsNonPrivileged(TENANT_USER);
+        assertRoleIsNonPrivileged(PROVISIONER_USER);
+
+        assertThatThrownBy(() -> jdbcTemplate.execute(
+                "CREATE SCHEMA tenant_runtime_role_must_not_create"
+        )).isInstanceOf(DataAccessException.class);
     }
 
     @Test
@@ -417,5 +481,91 @@ class TenantProvisioningPostgresIntegrationTests {
         boolean succeeded() {
             return response != null;
         }
+    }
+
+    private void assertRoleIsNonPrivileged(String role) {
+        var attributes = ADMIN_JDBC_TEMPLATE.queryForMap(
+                "SELECT rolsuper, rolcreatedb, rolcreaterole, rolbypassrls "
+                        + "FROM pg_roles WHERE rolname = ?",
+                role
+        );
+
+        assertThat(attributes.values()).containsOnly(false);
+    }
+
+    private static void initializeLeastPrivilegeDatabase() {
+        Flyway.configure()
+                .dataSource(
+                        POSTGRES.getJdbcUrl(),
+                        POSTGRES.getUsername(),
+                        POSTGRES.getPassword()
+                )
+                .schemas("public")
+                .defaultSchema("public")
+                .locations(publicMigrationLocation())
+                .load()
+                .migrate();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(),
+                POSTGRES.getUsername(),
+                POSTGRES.getPassword()
+        ); Statement statement = connection.createStatement()) {
+            statement.execute("CREATE ROLE " + AUTH_USER
+                    + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT "
+                    + "NOBYPASSRLS PASSWORD '" + AUTH_PASSWORD + "'");
+            statement.execute("CREATE ROLE " + TENANT_USER
+                    + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT "
+                    + "NOBYPASSRLS PASSWORD '" + TENANT_PASSWORD + "'");
+            statement.execute("CREATE ROLE " + PROVISIONER_USER
+                    + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT "
+                    + "NOBYPASSRLS PASSWORD '" + PROVISIONER_PASSWORD + "'");
+            statement.execute("REVOKE CONNECT, CREATE, TEMPORARY ON DATABASE "
+                    + POSTGRES.getDatabaseName() + " FROM PUBLIC");
+            statement.execute("GRANT CONNECT ON DATABASE "
+                    + POSTGRES.getDatabaseName() + " TO " + AUTH_USER);
+            statement.execute("GRANT CONNECT ON DATABASE "
+                    + POSTGRES.getDatabaseName() + " TO " + TENANT_USER);
+            statement.execute("GRANT CONNECT, CREATE ON DATABASE "
+                    + POSTGRES.getDatabaseName() + " TO " + PROVISIONER_USER);
+            statement.execute("GRANT USAGE ON SCHEMA public TO " + AUTH_USER);
+            statement.execute("GRANT SELECT ON public.tenants TO " + AUTH_USER);
+            statement.execute("GRANT USAGE ON SCHEMA public TO " + TENANT_USER);
+            statement.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON "
+                    + "public.tenants, public.tenant_notification_outbox TO "
+                    + TENANT_USER);
+        } catch (Exception exception) {
+            throw new ExceptionInInitializerError(exception);
+        }
+    }
+
+    private static JdbcTemplate adminJdbcTemplate() {
+        DriverManagerDataSource dataSource = new DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(),
+                POSTGRES.getUsername(),
+                POSTGRES.getPassword()
+        );
+        return new JdbcTemplate(dataSource);
+    }
+
+    private static JdbcTemplate authJdbcTemplate() {
+        DriverManagerDataSource dataSource = new DriverManagerDataSource(
+                POSTGRES.getJdbcUrl(),
+                AUTH_USER,
+                AUTH_PASSWORD
+        );
+        return new JdbcTemplate(dataSource);
+    }
+
+    private static String publicMigrationLocation() {
+        Path path = Path.of(
+                "..",
+                "..",
+                "infrastructure",
+                "db",
+                "migration",
+                "public"
+        ).toAbsolutePath().normalize();
+        return "filesystem:" + path.toString().replace('\\', '/');
     }
 }

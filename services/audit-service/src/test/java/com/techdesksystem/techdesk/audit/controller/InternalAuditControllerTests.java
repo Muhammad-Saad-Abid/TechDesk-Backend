@@ -19,8 +19,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(InternalAuditController.class)
 @Import(AuditSecurityProperties.class)
-@TestPropertySource(properties = "audit.internal-key=correct-internal-key")
+@TestPropertySource(properties = "audit.internal-key=0123456789abcdef0123456789abcdef")
 class InternalAuditControllerTests {
+
+    private static final String INTERNAL_KEY = "0123456789abcdef0123456789abcdef";
 
     private static final String BODY = """
             {
@@ -42,7 +44,7 @@ class InternalAuditControllerTests {
     @Test
     void validInternalCredentialStoresViolation() throws Exception {
         mockMvc.perform(post("/internal/audit/tenant-isolation-violations")
-                        .header("X-Internal-Key", "correct-internal-key")
+                        .header("X-Internal-Key", INTERNAL_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(BODY))
                 .andExpect(status().isNoContent());

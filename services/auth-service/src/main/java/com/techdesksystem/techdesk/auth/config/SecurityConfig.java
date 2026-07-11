@@ -12,8 +12,14 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
@@ -63,11 +69,34 @@ public class SecurityConfig {
     @Bean
     public JwtDecoder jwtDecoder(JwtProperties jwtProperties) {
         byte[] secret = jwtProperties.getSecret().getBytes(StandardCharsets.UTF_8);
-        return NimbusJwtDecoder.withSecretKey(
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(
                         new SecretKeySpec(secret, "HmacSHA256")
                 )
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
+        OAuth2TokenValidator<Jwt> accessTokenValidator = token ->
+                "access".equals(token.getClaimAsString("tokenType"))
+                        ? OAuth2TokenValidatorResult.success()
+                        : OAuth2TokenValidatorResult.failure(new OAuth2Error(
+                                "invalid_token",
+                                "Only access tokens are accepted.",
+                                null
+                        ));
+        OAuth2TokenValidator<Jwt> expirationClaimValidator = token ->
+                token.getExpiresAt() != null
+                        ? OAuth2TokenValidatorResult.success()
+                        : OAuth2TokenValidatorResult.failure(new OAuth2Error(
+                                "invalid_token",
+                                "Expiration claim is required.",
+                                null
+                        ));
+        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
+                JwtValidators.createDefault(),
+                expirationClaimValidator,
+                accessTokenValidator
+        ));
+
+        return decoder;
     }
 
     @Bean

@@ -31,7 +31,10 @@ class JwtUtilTests {
         user.setRole("EMPLOYEE");
         ReflectionTestUtils.setField(user, "id", 42L);
 
-        String token = jwtUtil.generateAccessToken(user);
+        String token = jwtUtil.generateAccessToken(
+                user,
+                List.of("tickets:create", "notifications:read")
+        );
         Claims claims = jwtUtil.parseAccessToken(token);
         String headerJson = new String(
                 Base64.getUrlDecoder().decode(token.split("\\.")[0]),
@@ -45,7 +48,8 @@ class JwtUtilTests {
                 .isEqualTo("tenant_claims_test");
         assertThat(claims.get("role", String.class)).isEqualTo("EMPLOYEE");
         List<?> permissions = claims.get("permissions", List.class);
-        assertThat(permissions).isEmpty();
+        assertThat(permissions.stream().map(Object::toString).toList())
+                .containsExactly("tickets:create", "notifications:read");
         assertThat(claims.get("tokenType", String.class)).isEqualTo("access");
         assertThat(claims.getExpiration()).isAfter(claims.getIssuedAt());
 

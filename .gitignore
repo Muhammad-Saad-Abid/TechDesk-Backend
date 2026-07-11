@@ -1,5 +1,7 @@
 # Local secrets
 .env
+.env.prod
+secrets/
 
 # Java build output
 **/target/

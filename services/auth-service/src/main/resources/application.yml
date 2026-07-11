@@ -3,7 +3,7 @@ spring:
     name: auth-service
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/techdesk}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:15432/techdesk}
     username: ${SPRING_DATASOURCE_USERNAME:techdesk}
     password: ${SPRING_DATASOURCE_PASSWORD:techdesk_dev_password}
     driver-class-name: org.postgresql.Driver
@@ -39,6 +39,10 @@ spring:
 server:
   port: 8081
 
+techdesk:
+  database:
+    require-least-privilege: ${DATABASE_REQUIRE_LEAST_PRIVILEGE:true}
+
 eureka:
   client:
     service-url:
@@ -53,7 +57,7 @@ management:
 auth:
   multitenancy:
     enabled: true
-    minimum-schema-version: "3"
+    minimum-schema-version: "5"
     audit-service-url: ${AUDIT_SERVICE_URL:http://localhost:8083}
     audit-internal-key: ${AUDIT_INTERNAL_KEY}
   jwt:

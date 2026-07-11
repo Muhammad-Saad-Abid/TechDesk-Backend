@@ -55,6 +55,42 @@ public class AuthMailService {
         mailSender.send(message);
     }
 
+    /**
+     * Sends an invitation link that lets a newly invited user set their first
+     * password. The invitation token is stored only as a hash server-side.
+     *
+     * @param recipient invited account email address
+     * @param invitationToken raw, single-use invitation token
+     * @param tenantId schema identifier of the invited account tenant
+     */
+    public void sendUserInvitationEmail(
+            String recipient,
+            String invitationToken,
+            String tenantId
+    ) {
+        String invitationLink = properties.getResetUrl()
+                + "?token=" + encode(invitationToken)
+                + "&tenant=" + encode(tenantId)
+                + "&mode=invite";
+
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setFrom(properties.getFromAddress());
+        message.setTo(recipient);
+        message.setSubject("You have been invited to TechDesk");
+        message.setText(
+                "You have been invited to join TechDesk. "
+                        + "Use the link below to set your password. "
+                        + "This invitation expires in "
+                        + properties.getExpirationMinutes()
+                        + " minutes.\n\n"
+                        + invitationLink
+                        + "\n\nIf you were not expecting this invitation, "
+                        + "you can ignore this email."
+        );
+
+        mailSender.send(message);
+    }
+
     private String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }

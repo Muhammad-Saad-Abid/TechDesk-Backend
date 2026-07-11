@@ -1,6 +1,7 @@
 package com.techdesksystem.techdesk.auth.controller;
 
 import com.techdesksystem.techdesk.auth.dto.UserCreateRequest;
+import com.techdesksystem.techdesk.auth.dto.UserInvitationRequest;
 import com.techdesksystem.techdesk.auth.dto.UserPermissionsResponse;
 import com.techdesksystem.techdesk.auth.dto.UserResponse;
 import com.techdesksystem.techdesk.auth.dto.UserRoleAssignmentRequest;
@@ -47,6 +48,16 @@ public class UserManagementController {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
                 .body(userManagementService.createUser(request));
+    }
+
+    @PostMapping("/invitations")
+    @RequiresPermission("users:invite")
+    public ResponseEntity<UserResponse> invite(
+            @Valid @RequestBody UserInvitationRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(userManagementService.inviteUser(request));
     }
 
     @GetMapping

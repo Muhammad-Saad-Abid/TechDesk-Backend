@@ -12,6 +12,7 @@ import com.techdesksystem.techdesk.auth.entity.User;
 import com.techdesksystem.techdesk.auth.entity.UserStatus;
 import com.techdesksystem.techdesk.auth.exception.AuthException;
 import com.techdesksystem.techdesk.auth.repository.UserRepository;
+import com.techdesksystem.techdesk.auth.security.PermissionService;
 import org.springframework.dao.DataIntegrityViolationException;
 import com.techdesksystem.techdesk.auth.util.JwtUtil;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -33,6 +34,7 @@ public class AuthService {
     private final JwtProperties jwtProperties;
     private final RefreshTokenService refreshTokenService;
     private final PasswordResetService passwordResetService;
+    private final PermissionService permissionService;
 
     public AuthService(
             UserRepository userRepository,
@@ -40,7 +42,8 @@ public class AuthService {
             JwtUtil jwtUtil,
             JwtProperties jwtProperties,
             RefreshTokenService refreshTokenService,
-            PasswordResetService passwordResetService
+            PasswordResetService passwordResetService,
+            PermissionService permissionService
     ) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
@@ -48,6 +51,7 @@ public class AuthService {
         this.jwtProperties = jwtProperties;
         this.refreshTokenService = refreshTokenService;
         this.passwordResetService = passwordResetService;
+        this.permissionService = permissionService;
     }
 
     @Transactional
@@ -177,7 +181,10 @@ public class AuthService {
     }
 
     private AuthResponse buildAuthResponse(User user, String refreshToken) {
-        String accessToken = jwtUtil.generateAccessToken(user);
+        String accessToken = jwtUtil.generateAccessToken(
+                user,
+                permissionService.effectivePermissionsForUser(user.getId())
+        );
 
         return new AuthResponse(
                 accessToken,

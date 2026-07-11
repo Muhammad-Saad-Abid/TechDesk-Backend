@@ -38,6 +38,10 @@ public class JwtUtil {
     }
 
     public String generateAccessToken(User user) {
+        return generateAccessToken(user, List.of());
+    }
+
+    public String generateAccessToken(User user, List<String> permissions) {
         Instant issuedAt = Instant.now();
         Instant expiresAt = issuedAt.plus(
                 jwtProperties.getAccessTokenMinutes(),
@@ -49,7 +53,7 @@ public class JwtUtil {
                 .claim("userId", user.getId())
                 .claim("tenantId", user.getTenantId())
                 .claim("role", user.getRole())
-                .claim("permissions", List.of())
+                .claim("permissions", permissions == null ? List.of() : permissions)
                 .claim("tokenType", "access")
                 .issuedAt(Date.from(issuedAt))
                 .expiration(Date.from(expiresAt))

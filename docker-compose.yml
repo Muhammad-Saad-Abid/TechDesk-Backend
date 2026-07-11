@@ -1,14 +1,20 @@
 name: techdesk-backend
 
+x-java-healthcheck: &java-healthcheck
+  interval: 10s
+  timeout: 8s
+  retries: 18
+  start_period: 5m
+
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:15.18-alpine3.24
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-15432}:5432"
     volumes:
       - techdesk-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -18,14 +24,41 @@ services:
       retries: 12
       start_period: 10s
 
+  database-role-bootstrap:
+    image: postgres:15.18-alpine3.24
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      AUTH_DB_USER: ${AUTH_DB_USER}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD}
+      TENANT_DB_USER: ${TENANT_DB_USER}
+      TENANT_DB_PASSWORD: ${TENANT_DB_PASSWORD}
+      AUDIT_DB_USER: ${AUDIT_DB_USER}
+      AUDIT_DB_PASSWORD: ${AUDIT_DB_PASSWORD}
+      PROVISIONER_DB_USER: ${PROVISIONER_DB_USER}
+      PROVISIONER_DB_PASSWORD: ${PROVISIONER_DB_PASSWORD}
+    command:
+      - psql
+      - --no-password
+      - --file=/bootstrap/configure-application-roles.sql
+    volumes:
+      - ./infrastructure/db/bootstrap:/bootstrap:ro
+    depends_on:
+      flyway:
+        condition: service_completed_successfully
+    restart: "no"
+
   pgadmin:
-    image: dpage/pgadmin4:latest
+    image: dpage/pgadmin4:9.14.0
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
       PGADMIN_CONFIG_SERVER_MODE: "False"
     ports:
-      - "5050:80"
+      - "127.0.0.1:5050:80"
     volumes:
       - techdesk-pgadmin-data:/var/lib/pgadmin
     depends_on:
@@ -33,9 +66,9 @@ services:
         condition: service_healthy
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.9-alpine3.21
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - techdesk-redis-data:/data
@@ -49,11 +82,11 @@ services:
   mailhog:
     image: mailhog/mailhog:v1.0.1
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
 
   flyway:
-    image: redgate/flyway:latest
+    image: redgate/flyway:12.9.0
     command:
       [
         "-url=jdbc:postgresql://postgres:5432/${POSTGRES_DB}",
@@ -76,34 +109,61 @@ services:
     build:
       context: ./services/discovery-server
     ports:
-      - "8761:8761"
+      - "127.0.0.1:8761:8761"
     environment:
       JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
+    healthcheck:
+      <<: *java-healthcheck
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "--max-time",
+          "5",
+          "http://127.0.0.1:8761/actuator/health"
+        ]
 
   api-gateway:
     build:
       context: ./services/api-gateway
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
       TENANT_RESOLUTION_JWT_HMAC_SECRET: ${AUTH_JWT_SECRET}
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       EUREKA_INSTANCE_HOSTNAME: api-gateway
+    healthcheck:
+      <<: *java-healthcheck
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "--max-time",
+          "5",
+          "http://127.0.0.1:8080/actuator/health"
+        ]
     depends_on:
       discovery-server:
-        condition: service_started
+        condition: service_healthy
 
   auth-service:
     build:
       context: ./services/auth-service
     ports:
-      - "8081:8081"
+      - "127.0.0.1:8081:8081"
     environment:
       JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?ApplicationName=auth-service
+      SPRING_DATASOURCE_USERNAME: ${AUTH_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${AUTH_DB_PASSWORD}
+      DATABASE_REQUIRE_LEAST_PRIVILEGE: "true"
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
       AUDIT_SERVICE_URL: http://audit-service:8083
       AUDIT_INTERNAL_KEY: ${AUDIT_INTERNAL_KEY}
@@ -113,10 +173,25 @@ services:
       SPRING_MAIL_PORT: 1025
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       EUREKA_INSTANCE_HOSTNAME: auth-service
+    healthcheck:
+      <<: *java-healthcheck
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "--max-time",
+          "5",
+          "http://127.0.0.1:8081/actuator/health"
+        ]
     depends_on:
       discovery-server:
-        condition: service_started
+        condition: service_healthy
       flyway:
+        condition: service_completed_successfully
+      database-role-bootstrap:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -125,40 +200,76 @@ services:
     build:
       context: ./services/tenant-service
     ports:
-      - "8082:8082"
+      - "127.0.0.1:8082:8082"
     environment:
       JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?ApplicationName=tenant-service
+      SPRING_DATASOURCE_USERNAME: ${TENANT_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${TENANT_DB_PASSWORD}
+      DATABASE_REQUIRE_LEAST_PRIVILEGE: "true"
+      TENANT_PROVISIONING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?ApplicationName=tenant-provisioner
+      TENANT_PROVISIONING_DATASOURCE_USERNAME: ${PROVISIONER_DB_USER}
+      TENANT_PROVISIONING_DATASOURCE_PASSWORD: ${PROVISIONER_DB_PASSWORD}
+      TENANT_RUNTIME_DB_ROLE: ${AUTH_DB_USER}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
       SPRING_MAIL_HOST: mailhog
       SPRING_MAIL_PORT: 1025
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       EUREKA_INSTANCE_HOSTNAME: tenant-service
+    healthcheck:
+      <<: *java-healthcheck
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "--max-time",
+          "5",
+          "http://127.0.0.1:8082/actuator/health"
+        ]
     depends_on:
       discovery-server:
-        condition: service_started
+        condition: service_healthy
       flyway:
+        condition: service_completed_successfully
+      database-role-bootstrap:
         condition: service_completed_successfully
 
   audit-service:
     build:
       context: ./services/audit-service
     ports:
-      - "8083:8083"
+      - "127.0.0.1:8083:8083"
     environment:
       JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?ApplicationName=audit-service
+      SPRING_DATASOURCE_USERNAME: ${AUDIT_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${AUDIT_DB_PASSWORD}
+      DATABASE_REQUIRE_LEAST_PRIVILEGE: "true"
       AUDIT_INTERNAL_KEY: ${AUDIT_INTERNAL_KEY}
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       EUREKA_INSTANCE_HOSTNAME: audit-service
+    healthcheck:
+      <<: *java-healthcheck
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "--max-time",
+          "5",
+          "http://127.0.0.1:8083/actuator/health"
+        ]
     depends_on:
       discovery-server:
-        condition: service_started
+        condition: service_healthy
       flyway:
+        condition: service_completed_successfully
+      database-role-bootstrap:
         condition: service_completed_successfully
 
 volumes:

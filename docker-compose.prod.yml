@@ -1,0 +1,328 @@
+name: techdesk-backend
+
+x-java-production: &java-production
+  init: true
+  user: "10001:10001"
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=128m
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:?POSTGRES_IMAGE must be an immutable digest reference}
+    ports: !reset []
+    environment: !override
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+    secrets:
+      - postgres_admin_password
+    networks:
+      - data
+    restart: unless-stopped
+
+  database-role-bootstrap:
+    image: ${POSTGRES_IMAGE:?POSTGRES_IMAGE must be an immutable digest reference}
+    environment: !override
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:?POSTGRES_DB is required}
+      PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      AUTH_DB_USER: ${AUTH_DB_USER:?AUTH_DB_USER is required}
+      TENANT_DB_USER: ${TENANT_DB_USER:?TENANT_DB_USER is required}
+      AUDIT_DB_USER: ${AUDIT_DB_USER:?AUDIT_DB_USER is required}
+      PROVISIONER_DB_USER: ${PROVISIONER_DB_USER:?PROVISIONER_DB_USER is required}
+    command:
+      - sh
+      - -ec
+      - |
+        export PGPASSWORD="$$(cat /run/secrets/postgres_admin_password)"
+        export AUTH_DB_PASSWORD="$$(cat /run/secrets/auth_db_password)"
+        export TENANT_DB_PASSWORD="$$(cat /run/secrets/tenant_db_password)"
+        export AUDIT_DB_PASSWORD="$$(cat /run/secrets/audit_db_password)"
+        export PROVISIONER_DB_PASSWORD="$$(cat /run/secrets/provisioner_db_password)"
+        exec psql --no-password --file=/bootstrap/configure-application-roles.sql
+    secrets:
+      - postgres_admin_password
+      - auth_db_password
+      - tenant_db_password
+      - audit_db_password
+      - provisioner_db_password
+    networks:
+      - data
+
+  pgadmin:
+    image: ${PGADMIN_IMAGE:?PGADMIN_IMAGE must be an immutable digest reference}
+    profiles:
+      - development-tools
+    ports: !reset []
+    environment: !override {}
+    networks:
+      - data
+
+  redis:
+    image: ${REDIS_IMAGE:?REDIS_IMAGE must be an immutable digest reference}
+    ports: !reset []
+    command:
+      - sh
+      - -ec
+      - exec redis-server --appendonly yes --requirepass "$$(cat /run/secrets/redis_password)"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - REDISCLI_AUTH="$$(cat /run/secrets/redis_password)" redis-cli ping
+    secrets:
+      - redis_password
+    networks:
+      - data
+    restart: unless-stopped
+
+  mailhog:
+    image: ${MAILHOG_IMAGE:?MAILHOG_IMAGE must be an immutable digest reference}
+    profiles:
+      - development-tools
+    ports: !reset []
+    networks:
+      - app
+
+  flyway:
+    image: ${FLYWAY_IMAGE:?FLYWAY_IMAGE must be an immutable digest reference}
+    command:
+      - -configFiles=/run/secrets/flyway.conf
+      - migrate
+    secrets:
+      - source: flyway_configuration
+        target: flyway.conf
+    networks:
+      - data
+
+  discovery-server:
+    <<: *java-production
+    image: ${DISCOVERY_SERVER_IMAGE:?DISCOVERY_SERVER_IMAGE must be an immutable digest reference}
+    build: !reset null
+    ports: !reset []
+    environment: !override
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--Xms128m -Xmx512m}
+      MANAGEMENT_SERVER_PORT: 9761
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: never
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - --max-time
+        - "5"
+        - http://127.0.0.1:9761/actuator/health
+    networks:
+      - app
+
+  api-gateway:
+    <<: *java-production
+    image: ${API_GATEWAY_IMAGE:?API_GATEWAY_IMAGE must be an immutable digest reference}
+    build: !reset null
+    labels:
+      com.techdesksystem.security.loopback-ingress-firewall-enforced: "${LOOPBACK_INGRESS_FIREWALL_ENFORCED:-false}"
+    ports: !override
+      - target: 8080
+        published: ${GATEWAY_PORT:-8080}
+        host_ip: ${GATEWAY_BIND_ADDRESS:-127.0.0.1}
+        protocol: tcp
+    environment: !override
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--Xms128m -Xmx512m}
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: api-gateway
+      MANAGEMENT_SERVER_PORT: 9080
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: never
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - --max-time
+        - "5"
+        - http://127.0.0.1:9080/actuator/health
+    secrets:
+      - source: auth_jwt_secret
+        target: tenant.resolution.jwt-hmac-secret
+    networks:
+      - app
+
+  auth-service:
+    <<: *java-production
+    image: ${AUTH_SERVICE_IMAGE:?AUTH_SERVICE_IMAGE must be an immutable digest reference}
+    build: !reset null
+    ports: !reset []
+    labels:
+      com.techdesksystem.security.external-egress-policy-enforced: "${EXTERNAL_EGRESS_POLICY_ENFORCED:-false}"
+    environment: !override
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--Xms128m -Xmx512m}
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?ApplicationName=auth-service
+      SPRING_DATASOURCE_USERNAME: ${AUTH_DB_USER:?AUTH_DB_USER is required}
+      DATABASE_REQUIRE_LEAST_PRIVILEGE: "true"
+      AUDIT_SERVICE_URL: http://audit-service:8083
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_MAIL_HOST: ${SMTP_HOST:?SMTP_HOST is required}
+      SPRING_MAIL_PORT: ${SMTP_PORT:-587}
+      SPRING_MAIL_USERNAME: ${SMTP_USERNAME:?SMTP_USERNAME is required}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: ${SMTP_AUTH:-true}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${SMTP_STARTTLS_ENABLE:-true}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_REQUIRED: ${SMTP_STARTTLS_REQUIRED:-true}
+      AUTH_PASSWORD_RESET_URL: ${AUTH_PASSWORD_RESET_URL:?AUTH_PASSWORD_RESET_URL is required}
+      AUTH_MAIL_FROM: ${AUTH_MAIL_FROM:?AUTH_MAIL_FROM is required}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: auth-service
+      MANAGEMENT_SERVER_PORT: 9081
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: never
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - --max-time
+        - "5"
+        - http://127.0.0.1:9081/actuator/health
+    secrets:
+      - source: auth_db_password
+        target: spring.datasource.password
+      - source: auth_jwt_secret
+        target: auth.jwt.secret
+      - source: audit_internal_key
+        target: auth.multitenancy.audit-internal-key
+      - source: redis_password
+        target: spring.data.redis.password
+      - source: smtp_password
+        target: spring.mail.password
+    networks:
+      - app
+      - data
+      - egress
+
+  tenant-service:
+    <<: *java-production
+    image: ${TENANT_SERVICE_IMAGE:?TENANT_SERVICE_IMAGE must be an immutable digest reference}
+    build: !reset null
+    ports: !reset []
+    labels:
+      com.techdesksystem.security.external-egress-policy-enforced: "${EXTERNAL_EGRESS_POLICY_ENFORCED:-false}"
+    environment: !override
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--Xms128m -Xmx512m}
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?ApplicationName=tenant-service
+      SPRING_DATASOURCE_USERNAME: ${TENANT_DB_USER:?TENANT_DB_USER is required}
+      DATABASE_REQUIRE_LEAST_PRIVILEGE: "true"
+      TENANT_PROVISIONING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?ApplicationName=tenant-provisioner
+      TENANT_PROVISIONING_DATASOURCE_USERNAME: ${PROVISIONER_DB_USER:?PROVISIONER_DB_USER is required}
+      TENANT_RUNTIME_DB_ROLE: ${AUTH_DB_USER:?AUTH_DB_USER is required}
+      SPRING_MAIL_HOST: ${SMTP_HOST:?SMTP_HOST is required}
+      SPRING_MAIL_PORT: ${SMTP_PORT:-587}
+      SPRING_MAIL_USERNAME: ${SMTP_USERNAME:?SMTP_USERNAME is required}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: ${SMTP_AUTH:-true}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${SMTP_STARTTLS_ENABLE:-true}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_REQUIRED: ${SMTP_STARTTLS_REQUIRED:-true}
+      TENANT_PORTAL_URL_TEMPLATE: ${TENANT_PORTAL_URL_TEMPLATE:?TENANT_PORTAL_URL_TEMPLATE is required}
+      TENANT_INVITATION_URL: ${TENANT_INVITATION_URL:?TENANT_INVITATION_URL is required}
+      TENANT_MAIL_FROM: ${TENANT_MAIL_FROM:?TENANT_MAIL_FROM is required}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: tenant-service
+      MANAGEMENT_SERVER_PORT: 9082
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: never
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - --max-time
+        - "5"
+        - http://127.0.0.1:9082/actuator/health
+    secrets:
+      - source: tenant_db_password
+        target: spring.datasource.password
+      - source: provisioner_db_password
+        target: tenant.provisioning-database.password
+      - source: auth_jwt_secret
+        target: tenant.security.jwt-secret
+      - source: smtp_password
+        target: spring.mail.password
+    networks:
+      - app
+      - data
+      - egress
+
+  audit-service:
+    <<: *java-production
+    image: ${AUDIT_SERVICE_IMAGE:?AUDIT_SERVICE_IMAGE must be an immutable digest reference}
+    build: !reset null
+    ports: !reset []
+    environment: !override
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--Xms128m -Xmx512m}
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?ApplicationName=audit-service
+      SPRING_DATASOURCE_USERNAME: ${AUDIT_DB_USER:?AUDIT_DB_USER is required}
+      DATABASE_REQUIRE_LEAST_PRIVILEGE: "true"
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: audit-service
+      MANAGEMENT_SERVER_PORT: 9083
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: never
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - --max-time
+        - "5"
+        - http://127.0.0.1:9083/actuator/health
+    secrets:
+      - source: audit_db_password
+        target: spring.datasource.password
+      - source: audit_internal_key
+        target: audit.internal-key
+    networks:
+      - app
+      - data
+
+networks:
+  app:
+    internal: true
+  data:
+    internal: true
+  egress:
+
+secrets:
+  postgres_admin_password:
+    file: ${TECHDESK_SECRETS_DIR:?TECHDESK_SECRETS_DIR is required}/postgres_admin_password
+  auth_db_password:
+    file: ${TECHDESK_SECRETS_DIR:?TECHDESK_SECRETS_DIR is required}/auth_db_password
+  tenant_db_password:
+    file: ${TECHDESK_SECRETS_DIR:?TECHDESK_SECRETS_DIR is required}/tenant_db_password
+  audit_db_password:
+    file: ${TECHDESK_SECRETS_DIR:?TECHDESK_SECRETS_DIR is required}/audit_db_password
+  provisioner_db_password:
+    file: ${TECHDESK_SECRETS_DIR:?TECHDESK_SECRETS_DIR is required}/provisioner_db_password
+  auth_jwt_secret:
+    file: ${TECHDESK_SECRETS_DIR:?TECHDESK_SECRETS_DIR is required}/auth_jwt_secret
+  audit_internal_key:
+    file: ${TECHDESK_SECRETS_DIR:?TECHDESK_SECRETS_DIR is required}/audit_internal_key
+  redis_password:
+    file: ${TECHDESK_SECRETS_DIR:?TECHDESK_SECRETS_DIR is required}/redis_password
+  smtp_password:
+    file: ${TECHDESK_SECRETS_DIR:?TECHDESK_SECRETS_DIR is required}/smtp_password
+  flyway_configuration:
+    file: ${TECHDESK_SECRETS_DIR:?TECHDESK_SECRETS_DIR is required}/flyway.conf

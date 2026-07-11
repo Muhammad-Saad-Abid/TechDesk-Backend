@@ -1,6 +1,7 @@
 package com.techdesksystem.techdesk.auth.service;
 
 import com.techdesksystem.techdesk.auth.dto.UserCreateRequest;
+import com.techdesksystem.techdesk.auth.dto.UserInvitationRequest;
 import com.techdesksystem.techdesk.auth.dto.UserResponse;
 import com.techdesksystem.techdesk.auth.dto.UserRoleAssignmentRequest;
 import com.techdesksystem.techdesk.auth.dto.UserUpdateRequest;
@@ -13,6 +14,7 @@ import com.techdesksystem.techdesk.auth.repository.DepartmentRepository;
 import com.techdesksystem.techdesk.auth.repository.RoleRepository;
 import com.techdesksystem.techdesk.auth.repository.UserRepository;
 import com.techdesksystem.techdesk.auth.security.PermissionService;
+import com.techdesksystem.techdesk.auth.tenant.TenantContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -46,6 +48,8 @@ class UserManagementServiceTests {
             mock(PasswordEncoder.class);
     private final PermissionService permissionService =
             mock(PermissionService.class);
+    private final PasswordResetService passwordResetService =
+            mock(PasswordResetService.class);
 
     private final UserManagementService userManagementService =
             new UserManagementService(
@@ -53,7 +57,8 @@ class UserManagementServiceTests {
                     roleRepository,
                     departmentRepository,
                     passwordEncoder,
-                    permissionService
+                    permissionService,
+                    passwordResetService
             );
 
     @Test
@@ -95,6 +100,47 @@ class UserManagementServiceTests {
 
         verify(userRepository).deleteRoleAssignments(42L);
         verify(userRepository).grantRole(42L, 3L, true);
+    }
+
+    @Test
+    void invitesUserWithDefaultEmployeeRole() {
+        Role employee = role(3L, "EMPLOYEE");
+        given(userRepository.existsByEmail("invitee@example.com"))
+                .willReturn(false);
+        given(roleRepository.findByName("EMPLOYEE"))
+                .willReturn(Optional.of(employee));
+        given(passwordEncoder.encode(any(String.class)))
+                .willReturn("temporary-bcrypt-hash");
+        given(userRepository.saveAndFlush(any(User.class)))
+                .willAnswer(invocation -> withPersistentFields(
+                        invocation.getArgument(0),
+                        99L
+                ));
+
+        UserResponse response;
+        try (TenantContext.Scope ignored = TenantContext.open("tenant_alpha")) {
+            response = userManagementService.inviteUser(
+                    new UserInvitationRequest(
+                            " INVITEE@Example.COM ",
+                            " Invited ",
+                            " User ",
+                            null,
+                            null,
+                            null
+                    )
+            );
+        }
+
+        assertThat(response.id()).isEqualTo(99L);
+        assertThat(response.email()).isEqualTo("invitee@example.com");
+        assertThat(response.status()).isEqualTo("INVITED");
+        assertThat(response.enabled()).isFalse();
+        assertThat(response.primaryRole()).isEqualTo("EMPLOYEE");
+        assertThat(response.roles()).containsExactly("EMPLOYEE");
+
+        verify(userRepository).deleteRoleAssignments(99L);
+        verify(userRepository).grantRole(99L, 3L, true);
+        verify(passwordResetService).sendInvitation(any(User.class));
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.techdesksystem.techdesk.auth.service;
 import com.techdesksystem.techdesk.auth.config.PasswordResetProperties;
 import com.techdesksystem.techdesk.auth.entity.PasswordResetToken;
 import com.techdesksystem.techdesk.auth.entity.User;
+import com.techdesksystem.techdesk.auth.entity.UserStatus;
 import com.techdesksystem.techdesk.auth.exception.AuthException;
 import com.techdesksystem.techdesk.auth.repository.PasswordResetTokenRepository;
 import com.techdesksystem.techdesk.auth.repository.UserRepository;
@@ -67,27 +68,35 @@ public class PasswordResetService {
         }
         user.setTenantId(tenantId);
 
-        Instant now = Instant.now();
-        List<PasswordResetToken> previousTokens =
-                passwordResetTokenRepository.findAllByUserAndUsedAtIsNull(user);
-
-        previousTokens.forEach(token -> token.setUsedAt(now));
-        passwordResetTokenRepository.saveAll(previousTokens);
-
-        String rawToken = tokenHashUtil.generateRawToken();
-        PasswordResetToken resetToken = new PasswordResetToken();
-        resetToken.setUser(user);
-        resetToken.setTokenHash(tokenHashUtil.hashToken(rawToken));
-        resetToken.setExpiresAt(now.plus(
-                properties.getExpirationMinutes(),
-                ChronoUnit.MINUTES
-        ));
-
-        passwordResetTokenRepository.saveAndFlush(resetToken);
+        String rawToken = issueToken(user);
         authMailService.sendPasswordResetEmail(
                 user.getEmail(),
                 rawToken,
                 user.getTenantId()
+        );
+    }
+
+    /**
+     * Issues an invitation token for an already-created INVITED user. This uses
+     * the same hashed, single-use token storage as password reset so onboarding
+     * links never persist raw secrets.
+     *
+     * @param invitedUser tenant-local invited user
+     */
+    @Transactional
+    public void sendInvitation(User invitedUser) {
+        if (invitedUser.getStatus() != UserStatus.INVITED) {
+            throw AuthException.badRequest(
+                    "USER_NOT_INVITED",
+                    "Only invited users can receive an onboarding invitation."
+            );
+        }
+
+        String rawToken = issueToken(invitedUser);
+        authMailService.sendUserInvitationEmail(
+                invitedUser.getEmail(),
+                rawToken,
+                invitedUser.getTenantId()
         );
     }
 
@@ -126,7 +135,19 @@ public class PasswordResetService {
             );
         }
 
+        if (user.getStatus() == UserStatus.SUSPENDED
+                || user.getStatus() == UserStatus.DISABLED) {
+            throw AuthException.forbidden(
+                    "ACCOUNT_DISABLED",
+                    "This user account is not active."
+            );
+        }
+
         user.setPasswordHash(passwordEncoder.encode(newPassword));
+        if (user.getStatus() == UserStatus.INVITED) {
+            user.setStatus(UserStatus.ACTIVE);
+            user.setEnabled(true);
+        }
         resetToken.setUsedAt(now);
 
         userRepository.save(user);
@@ -140,5 +161,26 @@ public class PasswordResetService {
                 "INVALID_RESET_TOKEN",
                 "Password reset token is invalid or has already been used."
         );
+    }
+
+    private String issueToken(User user) {
+        Instant now = Instant.now();
+        List<PasswordResetToken> previousTokens =
+                passwordResetTokenRepository.findAllByUserAndUsedAtIsNull(user);
+
+        previousTokens.forEach(token -> token.setUsedAt(now));
+        passwordResetTokenRepository.saveAll(previousTokens);
+
+        String rawToken = tokenHashUtil.generateRawToken();
+        PasswordResetToken resetToken = new PasswordResetToken();
+        resetToken.setUser(user);
+        resetToken.setTokenHash(tokenHashUtil.hashToken(rawToken));
+        resetToken.setExpiresAt(now.plus(
+                properties.getExpirationMinutes(),
+                ChronoUnit.MINUTES
+        ));
+
+        passwordResetTokenRepository.saveAndFlush(resetToken);
+        return rawToken;
     }
 }

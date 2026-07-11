@@ -1,20 +1,11 @@
 package com.techdesksystem.techdesk.gateway.tenant;
 
 import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
-import java.security.GeneralSecurityException;
-import java.security.MessageDigest;
-import java.time.Instant;
-import java.util.Base64;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.techdesksystem.techdesk.gateway.security.GatewayJwtVerifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
@@ -39,14 +30,14 @@ public class TenantResolutionGlobalFilter implements GlobalFilter, Ordered {
             Pattern.compile("^tenant_[a-z][a-z0-9_]{0,55}$");
 
     private final TenantResolutionProperties properties;
-    private final ObjectMapper objectMapper;
+    private final GatewayJwtVerifier jwtVerifier;
 
     public TenantResolutionGlobalFilter(
             TenantResolutionProperties properties,
-            ObjectMapper objectMapper
+            GatewayJwtVerifier jwtVerifier
     ) {
         this.properties = properties;
-        this.objectMapper = objectMapper;
+        this.jwtVerifier = jwtVerifier;
     }
 
     @Override
@@ -127,68 +118,10 @@ public class TenantResolutionGlobalFilter implements GlobalFilter, Ordered {
     }
 
     private Optional<String> resolveFromJwt(ServerHttpRequest request) {
-        String authorization = request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
-
-        if (authorization == null
-                || !authorization.regionMatches(true, 0, "Bearer ", 0, 7)
-                || properties.jwtHmacSecret() == null
-                || properties.jwtHmacSecret().isBlank()) {
-            return Optional.empty();
-        }
-
-        String token = authorization.substring(7).trim();
-        String[] parts = token.split("\\.", -1);
-
-        if (parts.length != 3) {
-            return Optional.empty();
-        }
-
-        try {
-            JsonNode header = objectMapper.readTree(decodeBase64Url(parts[0]));
-
-            if (!"HS256".equals(header.path("alg").asText())) {
-                return Optional.empty();
-            }
-
-            byte[] suppliedSignature = decodeBase64Url(parts[2]);
-            byte[] expectedSignature = sign(parts[0] + "." + parts[1]);
-
-            if (!MessageDigest.isEqual(expectedSignature, suppliedSignature)) {
-                return Optional.empty();
-            }
-
-            JsonNode claims = objectMapper.readTree(decodeBase64Url(parts[1]));
-
-            if (!claims.hasNonNull("exp")
-                    || !claims.path("exp").canConvertToLong()
-                    || claims.path("exp").asLong() <= Instant.now().getEpochSecond()
-                    || !"access".equals(claims.path("tokenType").asText())) {
-                return Optional.empty();
-            }
-
-            return validateSchemaName(claims.path("tenantId").asText());
-        } catch (Exception exception) {
-            return Optional.empty();
-        }
-    }
-
-    private byte[] sign(String unsignedToken) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            SecretKeySpec key = new SecretKeySpec(
-                    properties.jwtHmacSecret().getBytes(StandardCharsets.UTF_8),
-                    "HmacSHA256"
-            );
-
-            mac.init(key);
-            return mac.doFinal(unsignedToken.getBytes(StandardCharsets.UTF_8));
-        } catch (GeneralSecurityException exception) {
-            throw new IllegalStateException("Unable to verify JWT signature.", exception);
-        }
-    }
-
-    private byte[] decodeBase64Url(String value) {
-        return Base64.getUrlDecoder().decode(value);
+        return jwtVerifier.verifyAccessToken(
+                        request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION)
+                )
+                .flatMap(claims -> validateSchemaName(claims.tenantId()));
     }
 
     private Optional<String> validateSchemaName(String candidate) {

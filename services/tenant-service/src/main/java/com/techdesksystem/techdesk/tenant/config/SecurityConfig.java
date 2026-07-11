@@ -58,8 +58,17 @@ public class SecurityConfig {
                                 "Only access tokens are accepted.",
                                 null
                         ));
+        OAuth2TokenValidator<Jwt> expirationClaimValidator = token ->
+                token.getExpiresAt() != null
+                        ? OAuth2TokenValidatorResult.success()
+                        : OAuth2TokenValidatorResult.failure(new OAuth2Error(
+                                "invalid_token",
+                                "Expiration claim is required.",
+                                null
+                        ));
         decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
                 JwtValidators.createDefault(),
+                expirationClaimValidator,
                 accessTokenValidator
         ));
 

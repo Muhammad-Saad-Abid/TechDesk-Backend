@@ -10,6 +10,7 @@ import com.techdesksystem.techdesk.auth.dto.LoginRequest;
 import com.techdesksystem.techdesk.auth.entity.User;
 import com.techdesksystem.techdesk.auth.exception.AuthException;
 import com.techdesksystem.techdesk.auth.repository.UserRepository;
+import com.techdesksystem.techdesk.auth.security.PermissionService;
 import com.techdesksystem.techdesk.auth.util.JwtUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +40,9 @@ class AuthServiceTests {
     @Mock
     private PasswordResetService passwordResetService;
 
+    @Mock
+    private PermissionService permissionService;
+
     private AuthService authService;
 
     @BeforeEach
@@ -52,7 +56,8 @@ class AuthServiceTests {
                 jwtUtil,
                 jwtProperties,
                 refreshTokenService,
-                passwordResetService
+                passwordResetService,
+                permissionService
         );
     }
 
@@ -65,9 +70,17 @@ class AuthServiceTests {
                 .willReturn(Optional.of(user));
         given(passwordEncoder.matches("Password123!", user.getPasswordHash()))
                 .willReturn(true);
+        given(permissionService.effectivePermissionsForUser(42L))
+                .willReturn(java.util.List.of(
+                        "tickets:create",
+                        "notifications:read"
+                ));
         given(refreshTokenService.issueRefreshToken(user))
                 .willReturn("refresh-token");
-        given(jwtUtil.generateAccessToken(user)).willReturn("access-token");
+        given(jwtUtil.generateAccessToken(
+                user,
+                java.util.List.of("tickets:create", "notifications:read")
+        )).willReturn("access-token");
 
         AuthResponse response = authService.login("tenant_example", request);
 

@@ -50,6 +50,8 @@ class HibernateTenantIsolationIntegrationTests {
     private static final String TENANT_ALPHA = "tenant_alpha";
     private static final String TENANT_BRAVO = "tenant_bravo";
     private static final String SHARED_EMAIL = "shared@example.com";
+    private static final String AUTH_USER = "techdesk_auth";
+    private static final String AUTH_PASSWORD = "techdesk_auth_password";
 
     private static final PostgreSQLContainer<?> POSTGRES =
             new PostgreSQLContainer<>("postgres:15-alpine")
@@ -66,8 +68,8 @@ class HibernateTenantIsolationIntegrationTests {
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", POSTGRES::getUsername);
-        registry.add("spring.datasource.password", POSTGRES::getPassword);
+        registry.add("spring.datasource.username", () -> AUTH_USER);
+        registry.add("spring.datasource.password", () -> AUTH_PASSWORD);
         registry.add("spring.datasource.driver-class-name", POSTGRES::getDriverClassName);
     }
 
@@ -164,6 +166,28 @@ class HibernateTenantIsolationIntegrationTests {
         }
     }
 
+    @Test
+    void applicationDatasourceCannotBypassRowLevelSecurity() throws Exception {
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     SELECT current_user,
+                            rolsuper,
+                            rolcreatedb,
+                            rolcreaterole,
+                            rolbypassrls
+                     FROM pg_roles
+                     WHERE rolname = current_user
+                     """);
+             ResultSet result = statement.executeQuery()) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString("current_user")).isEqualTo(AUTH_USER);
+            assertThat(result.getBoolean("rolsuper")).isFalse();
+            assertThat(result.getBoolean("rolcreatedb")).isFalse();
+            assertThat(result.getBoolean("rolcreaterole")).isFalse();
+            assertThat(result.getBoolean("rolbypassrls")).isFalse();
+        }
+    }
+
     private Callable<String> readFirstName(
             String tenant,
             CountDownLatch workersReady,
@@ -213,6 +237,7 @@ class HibernateTenantIsolationIntegrationTests {
             seedTenantMetadata(connection, TENANT_BRAVO, "bravo", "Bravo Ltd");
             seedUser(connection, TENANT_ALPHA, "Alpha");
             seedUser(connection, TENANT_BRAVO, "Bravo");
+            createAndGrantAuthRole(connection);
         } catch (Exception exception) {
             throw new ExceptionInInitializerError(exception);
         }
@@ -255,6 +280,7 @@ class HibernateTenantIsolationIntegrationTests {
             String schema,
             String firstName
     ) throws Exception {
+        setSystemRbacContext(connection);
         String sql = "INSERT INTO " + schema + ".auth_users "
                 + "(email, password_hash, first_name, last_name, role, enabled) "
                 + "VALUES (?, 'not-used', ?, 'User', 'EMPLOYEE', TRUE)";
@@ -262,6 +288,40 @@ class HibernateTenantIsolationIntegrationTests {
             statement.setString(1, SHARED_EMAIL);
             statement.setString(2, firstName);
             statement.executeUpdate();
+        }
+    }
+
+    private static void setSystemRbacContext(Connection connection)
+            throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(
+                    "SELECT set_config('techdesk.rbac.system', 'true', false)"
+            );
+        }
+    }
+
+    private static void createAndGrantAuthRole(Connection connection)
+            throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("CREATE ROLE " + AUTH_USER
+                    + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
+                    + "NOBYPASSRLS PASSWORD '" + AUTH_PASSWORD + "'");
+            statement.execute("GRANT CONNECT ON DATABASE "
+                    + POSTGRES.getDatabaseName() + " TO " + AUTH_USER);
+            statement.execute("GRANT USAGE ON SCHEMA public TO " + AUTH_USER);
+            statement.execute("GRANT SELECT ON public.tenants TO " + AUTH_USER);
+
+            for (String tenant : List.of(TENANT_ALPHA, TENANT_BRAVO)) {
+                statement.execute("GRANT USAGE ON SCHEMA " + tenant
+                        + " TO " + AUTH_USER);
+                statement.execute("GRANT SELECT, INSERT, UPDATE, DELETE "
+                        + "ON ALL TABLES IN SCHEMA " + tenant
+                        + " TO " + AUTH_USER);
+                statement.execute("GRANT USAGE, SELECT ON ALL SEQUENCES "
+                        + "IN SCHEMA " + tenant + " TO " + AUTH_USER);
+                statement.execute("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA "
+                        + tenant + " TO " + AUTH_USER);
+            }
         }
     }
 

@@ -3,7 +3,7 @@ spring:
     name: tenant-service
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/techdesk}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:15432/techdesk}
     username: ${SPRING_DATASOURCE_USERNAME:techdesk}
     password: ${SPRING_DATASOURCE_PASSWORD:techdesk_dev_password}
     driver-class-name: org.postgresql.Driver
@@ -39,6 +39,10 @@ spring:
 server:
   port: 8082
 
+techdesk:
+  database:
+    require-least-privilege: ${DATABASE_REQUIRE_LEAST_PRIVILEGE:true}
+
 eureka:
   client:
     service-url:
@@ -53,6 +57,12 @@ management:
 tenant:
   security:
     jwt-secret: ${AUTH_JWT_SECRET}
+  provisioning-database:
+    url: ${TENANT_PROVISIONING_DATASOURCE_URL:${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:15432/techdesk}}
+    username: ${TENANT_PROVISIONING_DATASOURCE_USERNAME:${SPRING_DATASOURCE_USERNAME:techdesk}}
+    password: ${TENANT_PROVISIONING_DATASOURCE_PASSWORD:${SPRING_DATASOURCE_PASSWORD:techdesk_dev_password}}
+    runtime-role: ${TENANT_RUNTIME_DB_ROLE:${SPRING_DATASOURCE_USERNAME:techdesk}}
+    require-least-privilege: ${DATABASE_REQUIRE_LEAST_PRIVILEGE:true}
   provisioning:
     migration-location: classpath:db/migration/tenant
     portal-url-template: ${TENANT_PORTAL_URL_TEMPLATE:http://%s.techdesk.local}

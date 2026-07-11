@@ -2,7 +2,7 @@ spring:
   application:
     name: audit-service
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/techdesk}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:15432/techdesk}
     username: ${SPRING_DATASOURCE_USERNAME:techdesk}
     password: ${SPRING_DATASOURCE_PASSWORD:techdesk_dev_password}
     driver-class-name: org.postgresql.Driver
@@ -12,6 +12,10 @@ audit:
 
 server:
   port: 8083
+
+techdesk:
+  database:
+    require-least-privilege: ${DATABASE_REQUIRE_LEAST_PRIVILEGE:true}
 
 eureka:
   client:

@@ -11,6 +11,7 @@ import com.techdesksystem.techdesk.auth.config.PasswordResetProperties;
 import com.techdesksystem.techdesk.auth.entity.PasswordResetToken;
 import com.techdesksystem.techdesk.auth.entity.RefreshToken;
 import com.techdesksystem.techdesk.auth.entity.User;
+import com.techdesksystem.techdesk.auth.entity.UserStatus;
 import com.techdesksystem.techdesk.auth.exception.AuthException;
 import com.techdesksystem.techdesk.auth.repository.AuditLogRepository;
 import com.techdesksystem.techdesk.auth.repository.PasswordResetTokenRepository;
@@ -168,6 +169,38 @@ class PasswordResetServiceIntegrationTests {
                 org.mockito.ArgumentMatchers.anyString(),
                 eq("tenant_password_test")
         );
+    }
+
+    @Test
+    void invitedUserSetsPasswordAndBecomesActive() {
+        User user = createUser("invited-reset@example.com");
+        user.setStatus(UserStatus.INVITED);
+        user.setEnabled(false);
+        user = userRepository.saveAndFlush(user);
+
+        passwordResetService.sendInvitation(user);
+
+        ArgumentCaptor<String> rawTokenCaptor =
+                ArgumentCaptor.forClass(String.class);
+        verify(authMailService).sendUserInvitationEmail(
+                eq(user.getEmail()),
+                rawTokenCaptor.capture(),
+                eq(user.getTenantId())
+        );
+
+        passwordResetService.resetPassword(
+                user.getTenantId(),
+                rawTokenCaptor.getValue(),
+                "InvitedSecurePassword123!"
+        );
+
+        User activatedUser = userRepository.findById(user.getId()).orElseThrow();
+        assertThat(activatedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(activatedUser.isEnabled()).isTrue();
+        assertThat(passwordEncoder.matches(
+                "InvitedSecurePassword123!",
+                activatedUser.getPasswordHash()
+        )).isTrue();
     }
 
     @Test

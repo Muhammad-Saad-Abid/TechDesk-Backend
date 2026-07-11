@@ -8,8 +8,17 @@ spring:
         webflux:
           discovery:
             locator:
-              enabled: true
+              enabled: false
               lower-case-service-id: true
+          routes:
+            - id: auth-service-api
+              uri: lb://auth-service
+              predicates:
+                - Path=/api/auth/**,/api/users/**,/api/departments/**,/api/roles/**,/api/permissions,/api/permissions/**
+            - id: tenant-service-api
+              uri: lb://tenant-service
+              predicates:
+                - Path=/api/tenants/**
 
 server:
   port: 8080
@@ -23,7 +32,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,gateway
+        include: health,info
 
 tenant:
   resolution:
@@ -31,3 +40,29 @@ tenant:
       - .techdesk.local
       - .techdesk.com
     jwt-hmac-secret: ${TENANT_RESOLUTION_JWT_HMAC_SECRET:}
+
+security:
+  rbac:
+    enabled: true
+    rules:
+      - path: /api/users/**
+        methods: [GET]
+        roles: [SUPER_ADMIN, COMPANY_ADMIN, IT_MANAGER, AUDITOR]
+      - path: /api/users/**
+        methods: [POST, PATCH, PUT, DELETE]
+        roles: [SUPER_ADMIN, COMPANY_ADMIN]
+      - path: /api/departments/**
+        methods: [GET]
+        roles: [SUPER_ADMIN, COMPANY_ADMIN, IT_MANAGER, AUDITOR]
+      - path: /api/departments/**
+        methods: [POST, PATCH, PUT, DELETE]
+        roles: [SUPER_ADMIN, COMPANY_ADMIN]
+      - path: /api/roles/**
+        methods: [GET]
+        roles: [SUPER_ADMIN, COMPANY_ADMIN, IT_MANAGER, AUDITOR]
+      - path: /api/roles/**
+        methods: [POST, PATCH, PUT, DELETE]
+        roles: [SUPER_ADMIN, COMPANY_ADMIN]
+      - path: /api/permissions
+        methods: [GET]
+        roles: [SUPER_ADMIN, COMPANY_ADMIN, IT_MANAGER, AUDITOR]

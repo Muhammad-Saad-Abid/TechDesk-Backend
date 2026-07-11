@@ -2,6 +2,9 @@ package com.techdesksystem.techdesk.auth.tenant;
 
 import com.techdesksystem.techdesk.auth.config.AuthMultitenancyProperties;
 import org.hibernate.engine.jdbc.connections.spi.MultiTenantConnectionProvider;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
@@ -9,6 +12,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.List;
 
 @Component
 public class SchemaMultiTenantConnectionProvider
@@ -75,6 +79,7 @@ public class SchemaMultiTenantConnectionProvider
                 );
             }
             requireCurrentMigrationVersion(connection);
+            applyRbacSessionSettings(connection);
             ready = true;
             return TenantSchemaConnectionGuard.protect(
                     connection,
@@ -144,6 +149,7 @@ public class SchemaMultiTenantConnectionProvider
         SQLException resetFailure = null;
         try {
             if (!connection.isClosed()) {
+                clearRbacSessionSettings(connection);
                 connection.setSchema(PUBLIC_SCHEMA);
             }
         } catch (SQLException exception) {
@@ -174,10 +180,78 @@ public class SchemaMultiTenantConnectionProvider
             try (ResultSet result = statement.executeQuery()) {
                 if (!result.next() || !result.getBoolean(1)) {
                     throw new TenantIsolationException(
-                            "Tenant schema has not reached the required migration version."
+                    "Tenant schema has not reached the required migration version."
                     );
                 }
             }
         }
+    }
+
+    private void applyRbacSessionSettings(Connection connection)
+            throws SQLException {
+        Authentication authentication = SecurityContextHolder.getContext()
+                .getAuthentication();
+
+        if (authentication == null
+                || !authentication.isAuthenticated()
+                || !(authentication.getPrincipal() instanceof Jwt jwt)) {
+            setSessionSetting(connection, "techdesk.rbac.system", "true");
+            setSessionSetting(connection, "techdesk.rbac.user_id", "");
+            setSessionSetting(connection, "techdesk.rbac.role", "");
+            setSessionSetting(connection, "techdesk.rbac.permissions", "");
+            return;
+        }
+
+        setSessionSetting(connection, "techdesk.rbac.system", "false");
+        setSessionSetting(connection, "techdesk.rbac.user_id", userId(jwt));
+        setSessionSetting(connection, "techdesk.rbac.role", role(jwt));
+        setSessionSetting(
+                connection,
+                "techdesk.rbac.permissions",
+                String.join(",", permissions(jwt))
+        );
+    }
+
+    private void clearRbacSessionSettings(Connection connection)
+            throws SQLException {
+        setSessionSetting(connection, "techdesk.rbac.system", "false");
+        setSessionSetting(connection, "techdesk.rbac.user_id", "");
+        setSessionSetting(connection, "techdesk.rbac.role", "");
+        setSessionSetting(connection, "techdesk.rbac.permissions", "");
+    }
+
+    private void setSessionSetting(
+            Connection connection,
+            String key,
+            String value
+    ) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT set_config(?, ?, false)"
+        )) {
+            statement.setString(1, key);
+            statement.setString(2, value == null ? "" : value);
+            statement.executeQuery();
+        }
+    }
+
+    private String userId(Jwt jwt) {
+        Object claim = jwt.getClaim("userId");
+        if (claim instanceof Number number) {
+            return Long.toString(number.longValue());
+        }
+        if (claim instanceof String text) {
+            return text.trim();
+        }
+        return "";
+    }
+
+    private String role(Jwt jwt) {
+        String role = jwt.getClaimAsString("role");
+        return role == null ? "" : role.trim();
+    }
+
+    private List<String> permissions(Jwt jwt) {
+        List<String> permissions = jwt.getClaimAsStringList("permissions");
+        return permissions == null ? List.of() : permissions;
     }
 }

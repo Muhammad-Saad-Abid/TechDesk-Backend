@@ -13,6 +13,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.techdesksystem.techdesk.gateway.security.GatewayJwtVerifier;
 import org.junit.jupiter.api.Test;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.http.HttpHeaders;
@@ -26,13 +27,15 @@ class TenantResolutionGlobalFilterTests {
             "test-secret-that-is-at-least-thirty-two-bytes-long";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final TenantResolutionProperties properties =
+            new TenantResolutionProperties(
+                    List.of(".techdesk.local", ".techdesk.com"),
+                    SECRET
+            );
     private final TenantResolutionGlobalFilter filter =
             new TenantResolutionGlobalFilter(
-                    new TenantResolutionProperties(
-                            List.of(".techdesk.local", ".techdesk.com"),
-                            SECRET
-                    ),
-                    objectMapper
+                    properties,
+                    new GatewayJwtVerifier(properties, objectMapper)
             );
 
     @Test
@@ -186,6 +189,8 @@ class TenantResolutionGlobalFilterTests {
         String header = encodeJson(Map.of("alg", "HS256", "typ", "JWT"));
         String payload = encodeJson(Map.of(
                 "tenantId", tenantId,
+                "role", "EMPLOYEE",
+                "permissions", List.of("tickets:create"),
                 "exp", expiresAt.getEpochSecond(),
                 "tokenType", tokenType
         ));

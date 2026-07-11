@@ -1,6 +1,7 @@
 package com.techdesksystem.techdesk.auth.service;
 
 import com.techdesksystem.techdesk.auth.dto.UserCreateRequest;
+import com.techdesksystem.techdesk.auth.dto.UserInvitationRequest;
 import com.techdesksystem.techdesk.auth.dto.UserPermissionsResponse;
 import com.techdesksystem.techdesk.auth.dto.UserResponse;
 import com.techdesksystem.techdesk.auth.dto.UserRoleAssignmentRequest;
@@ -14,6 +15,7 @@ import com.techdesksystem.techdesk.auth.repository.DepartmentRepository;
 import com.techdesksystem.techdesk.auth.repository.RoleRepository;
 import com.techdesksystem.techdesk.auth.repository.UserRepository;
 import com.techdesksystem.techdesk.auth.security.PermissionService;
+import com.techdesksystem.techdesk.auth.tenant.TenantContext;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -33,6 +35,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -46,19 +49,22 @@ public class UserManagementService {
     private final DepartmentRepository departmentRepository;
     private final PasswordEncoder passwordEncoder;
     private final PermissionService permissionService;
+    private final PasswordResetService passwordResetService;
 
     public UserManagementService(
             UserRepository userRepository,
             RoleRepository roleRepository,
             DepartmentRepository departmentRepository,
             PasswordEncoder passwordEncoder,
-            PermissionService permissionService
+            PermissionService permissionService,
+            PasswordResetService passwordResetService
     ) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.departmentRepository = departmentRepository;
         this.passwordEncoder = passwordEncoder;
         this.permissionService = permissionService;
+        this.passwordResetService = passwordResetService;
     }
 
     /**
@@ -98,6 +104,55 @@ public class UserManagementService {
                 resolvedRoles.roles(),
                 resolvedRoles.primaryRole().getId()
         );
+
+        return toResponse(
+                savedUser,
+                resolvedRoles.roles().stream()
+                        .map(Role::getName)
+                        .sorted()
+                        .toList()
+        );
+    }
+
+    /**
+     * Creates an INVITED user and emails a single-use onboarding link so the
+     * user can set their own password before the account becomes active.
+     */
+    @Transactional
+    public UserResponse inviteUser(UserInvitationRequest request) {
+        String tenantId = TenantContext.requireTenant();
+        String normalizedEmail = normalizeEmail(request.email());
+        if (userRepository.existsByEmail(normalizedEmail)) {
+            throw duplicateEmail();
+        }
+
+        ResolvedRoles resolvedRoles = resolveInvitationRoles(request);
+
+        User user = new User();
+        user.setTenantId(tenantId);
+        user.setEmail(normalizedEmail);
+        user.setPasswordHash(passwordEncoder.encode(
+                UUID.randomUUID() + ":" + UUID.randomUUID()
+        ));
+        user.setFirstName(trimToNull(request.firstName()));
+        user.setLastName(trimToNull(request.lastName()));
+        user.setDepartment(resolveDepartment(request.departmentId()));
+        user.setRole(resolvedRoles.primaryRole().getName());
+        applyStatus(user, UserStatus.INVITED);
+
+        User savedUser;
+        try {
+            savedUser = userRepository.saveAndFlush(user);
+        } catch (DataIntegrityViolationException exception) {
+            throw duplicateEmail();
+        }
+
+        replaceRoleAssignments(
+                savedUser.getId(),
+                resolvedRoles.roles(),
+                resolvedRoles.primaryRole().getId()
+        );
+        passwordResetService.sendInvitation(savedUser);
 
         return toResponse(
                 savedUser,
@@ -255,6 +310,19 @@ public class UserManagementService {
     }
 
     private ResolvedRoles resolveCreateRoles(UserCreateRequest request) {
+        if (request.roleIds() == null || request.roleIds().isEmpty()) {
+            Role defaultRole = roleRepository.findByName(DEFAULT_ROLE_NAME)
+                    .orElseThrow(() -> AuthException.badRequest(
+                            "DEFAULT_ROLE_NOT_FOUND",
+                            "Default employee role is not available."
+                    ));
+            return new ResolvedRoles(List.of(defaultRole), defaultRole);
+        }
+
+        return resolveRoles(request.roleIds(), request.primaryRoleId());
+    }
+
+    private ResolvedRoles resolveInvitationRoles(UserInvitationRequest request) {
         if (request.roleIds() == null || request.roleIds().isEmpty()) {
             Role defaultRole = roleRepository.findByName(DEFAULT_ROLE_NAME)
                     .orElseThrow(() -> AuthException.badRequest(
